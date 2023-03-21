@@ -3,6 +3,35 @@ library("tuneR")
 library("soundecology")
 library("stats")
 
+frequency_filter <-function(dir_path, min_freq, max_freq) {
+    if (file.access(dir_path) == -1) {
+		stop(paste("The directory specified does not exist or this user is not autorized to read it:\n    ", directory))
+		}
+
+    file_Names <- list.files(path = dir_path, pattern = "\\.wav$", full.names = TRUE)
+
+    for (file_name in file_Names) {
+        audio_data <- tuneR::readWave(file_name)
+        tuneR::normalize(audio_data, unit = c("1"), center =FALSE, rescale = FALSE) # the interval chosen is [-1,1]
+        sample_rate <- audio_data@samp.rate
+        bit <- audio_data@bit
+
+        fourier <- fft(audio_data@left, inverse= TRUE) # fourier transformation
+
+        # Frequencies
+        freq <- (0:(length(audio_data@left)-1)) * (sample_rate / length(audio_data@left))
+
+        # Filtering the sample
+        fourier[freq < min_freq] <- 0 #High Pass filter
+        fourier[freq > max_freq] <- 0 # Low pass filter
+ 
+        
+        filtered_sig <- Re(signal::ifft(fourier)) # Inverse fourier transformation
+
+        filtered_wav <- tuneR::Wave(filtered_sig, samp.rate = sample_rate, bit = bit)
+        tuneR::writeWave(filtered_wav, filename = file_name, sample_rate)
+    }
+}
 
 acoustic_helper <- function(data, indices) {
 
@@ -34,54 +63,67 @@ acoustic_helper <- function(data, indices) {
     return(get(indices)())
 }
 
-acoustic_filter <- function(fileName, acoustimestep) {
-    max_val <-30
-	fileName <- 'PinkPanther30'
-    acoustic_index <- 'BI'
-    timeStep <-3
+acoustic_filter <- function(dir_path, acoustic_index, max_val, timeStep) {
+    if (file.access(dir_path) == -1) {
+		stop(paste("The directory specified does not exist or this user is not autorized to read it:\n    ", directory))
+	}
 
-    audio_data <- readWave(paste0(fileName, '.wav'))
-    sample_rate <- audio_data@samp.rate
-    bit <- audio_data@bit
+    file_Names <- list.files(path = dir_path, pattern = "\\.wav$", full.names = TRUE)
 
-    num_files <- 3
-    file_length <- floor(length(audio_data)/num_files)
-    subarrays <- split(audio_data, rep(1:num_files, each=file_length,length.out = length(audio_data@left)))
-    #subarrays <- split(audio_data, ceiling(seq_along(audio_data)/ts))
+    for (file_name in file_Names) {
 
-    # Create the directory (if it doesn't already exist)
-    dir_name = paste0('Filtered_',fileName)
-    if (file.exists(dir_name)) {
-        unlink(dir_name,recursive=TRUE)
-    }
+        audio_data <- readWave(paste0(file_name, '.wav'))
+        sample_rate <- audio_data@samp.rate
+        bit <- audio_data@bit
 
-    dir.create(dir_name)
-    
-    # Calculates the <insert acoustic index here> for each subarray
-    count <- 0
-    indices <- vector("list",timeStep)
-    concatenated_wav <- Wave(rep(0, 0), samp.rate = sample_rate, bit = bit)
-    for (i in seq_along(subarrays)) {
-        #temp_filePath <- file.path(dir_name,paste0(fileName,'_',(i-1)*file_length,'_',(i)*file_length, '.wav'))
-        #tuneR::writeWave(subarrays[[i]], filename = temp_filePath, sample_rate)
+        file_length <- floor(length(audio_data)/timeStep)
+        subarrays <- split(audio_data, rep(1:timeStep, each=file_length,length.out = length(audio_data@left)))
 
-        indices[i] <- acoustic_helper(subarrays[[i]], acoustic_index)
 
-        cat(acoustic_index, " for [", count,",",count+file_length , "]:    ", toString(indices[i]), "\n")
-        if (indices[i] > max_val)
-		{
-		#subarrays[[i]] <-tuneR::silence(subarrays[[i]],sample_rate,num_channels)# Makes the audio silent
-        subarrays[[i]] <- Wave(rep(0, length(subarrays[[i]])), samp.rate = sample_rate, bit = bit)
+        # Calculates the <insert acoustic index here> for each subarray
+        count <- 0
+        concatenated_wav <- Wave(rep(0, 0), samp.rate = sample_rate, bit = bit)
+        for (i in seq_along(subarrays)) {
+            # Assigns the indices to a temp variable
+            indices <- acoustic_helper(subarrays[[i]], acoustic_index)
+
+            cat(acoustic_index, " for [", count,",",count+file_length , "]:    ", toString(indices), "\n")
+            if (indices > max_val) {
+                subarrays[[i]] <- Wave(rep(0, length(subarrays[[i]])), samp.rate = sample_rate, bit = bit) # nolint: line_length_linter.
+            }
+
+            concatenated_waveform <- c(as.vector(concatenated_wav@left), as.vector(subarrays[[i]]@left))
+            concatenated_wav <- Wave(concatenated_waveform, samp.rate = sample_rate, bit = bit)
+            count <- count + file_length
         }
-        #concatenated_wav <- c(concatenated_wav,subarrays[[i]])
-        concatenated_waveform <- c(as.vector(concatenated_wav@left), as.vector(subarrays[[i]]@left))
-        concatenated_wav <- Wave(concatenated_waveform, samp.rate = sample_rate, bit = bit)
-        count <- count + file_length
+
+        tuneR::writeWave(concatenated_wav, filename = file_name, sample_rate)
     }
-    
-    temp_filePath <- file.path(dir_name,fileName, '.wav')
-    tuneR::writeWave(concatenated_wav, filename = 'yo.wav', sample_rate)
     
 
 }
-acoustic_filter()
+
+# Sets the defaults values for testing purposes
+fileName = 'PinkPanther30.wav'
+acoustic_index <- 'BI'
+max_val <-10
+timeStep <-3
+max_freq = 10
+min_freq = 0
+
+
+# Create the directory (if it doesn't already exist)
+dir_name = paste0('Filtered_',fileName)
+if (file.exists(dir_name)) {
+    unlink(dir_name,recursive=TRUE)
+}
+
+dir.create(dir_name)
+
+file.copy(from = fileName, to = dir_name,overwrite = TRUE) # Copies the original file to the new directory
+
+
+
+
+frequency_filter(dir_name, min_freq, max_freq)
+#acoustic_filter(dir_name, acoustic_index, max_val, timeStep)
