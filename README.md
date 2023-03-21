@@ -1,4 +1,4 @@
-# Foobar
+# Filtering
 
 soundecology is a R library for dealing with .wav files
 
